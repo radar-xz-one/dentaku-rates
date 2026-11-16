@@ -1,0 +1,51 @@
+"""Fetch daily FX rates (units per 1 JPY) and write docs/rates.json. Tries several free sources in order."""
+import json
+import sys
+import time
+import urllib.request
+
+SOURCES = []
+
+
+def get(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "dentaku-rates/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def er_api():
+    j = get("https://open.er-api.com/v6/latest/JPY")
+    assert j["result"] == "success"
+    return j["rates"], j.get("time_last_update_unix", int(time.time()))
+
+
+def fawaz():
+    j = get("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/jpy.json")
+    rates = {k.upper(): v for k, v in j["jpy"].items() if len(k) == 3 and v}
+    rates["CNH"] = rates.get("CNY", 0)
+    return rates, int(time.time())
+
+
+def fawaz_fallback():
+    j = get("https://latest.currency-api.pages.dev/v1/currencies/jpy.json")
+    rates = {k.upper(): v for k, v in j["jpy"].items() if len(k) == 3 and v}
+    rates["CNH"] = rates.get("CNY", 0)
+    return rates, int(time.time())
+
+
+for name, fn in [("open.er-api.com", er_api), ("fawazahmed0 (jsdelivr)", fawaz), ("fawazahmed0 (pages.dev)", fawaz_fallback)]:
+    try:
+        rates, ts = fn()
+        rates = {k: v for k, v in rates.items() if isinstance(v, (int, float)) and v > 0}
+        if len(rates) < 50 or "USD" not in rates:
+            raise ValueError("too few rates: %d" % len(rates))
+        out = {"source": name, "updated_unix": int(ts), "fetched_unix": int(time.time()), "base": "JPY", "rates": rates}
+        with open("docs/rates.json", "w", encoding="utf-8") as f:
+            json.dump(out, f, separators=(",", ":"), sort_keys=True)
+        print("OK", name, len(rates), "currencies")
+        sys.exit(0)
+    except Exception as e:
+        print("FAILED", name, e, file=sys.stderr)
+
+print("All sources failed", file=sys.stderr)
+sys.exit(1)
