@@ -1,4 +1,5 @@
 """Fetch daily FX rates (units per 1 JPY) and write docs/rates.json. Tries several free sources in order."""
+import calendar
 import json
 import sys
 import time
@@ -39,10 +40,12 @@ def crypto():
                 "https://latest.currency-api.pages.dev/v1/currencies/jpy.json"):
         try:
             j = get(url)["jpy"]
-            return {c: j[c.lower()] for c in CRYPTO if j.get(c.lower())}
+            day = get(url).get("date")
+            ts = calendar.timegm(time.strptime(day, "%Y-%m-%d")) if day else int(time.time())
+            return {c: j[c.lower()] for c in CRYPTO if j.get(c.lower())}, ts
         except Exception as e:
             print("CRYPTO FAILED", url, e, file=sys.stderr)
-    return {}
+    return {}, 0
 
 
 for name, fn in [("open.er-api.com", er_api), ("fawazahmed0 (jsdelivr)", fawaz), ("fawazahmed0 (pages.dev)", fawaz_fallback)]:
@@ -51,8 +54,9 @@ for name, fn in [("open.er-api.com", er_api), ("fawazahmed0 (jsdelivr)", fawaz),
         rates = {k: v for k, v in rates.items() if isinstance(v, (int, float)) and v > 0}
         if len(rates) < 50 or "USD" not in rates:
             raise ValueError("too few rates: %d" % len(rates))
-        rates.update(crypto())
-        out = {"source": name, "updated_unix": int(ts), "fetched_unix": int(time.time()), "base": "JPY", "rates": rates}
+        crypto_rates, crypto_ts = crypto()
+        rates.update(crypto_rates)
+        out = {"source": name, "updated_unix": int(ts), "updated_unix_crypto": int(crypto_ts), "fetched_unix": int(time.time()), "base": "JPY", "rates": rates}
         with open("docs/rates.json", "w", encoding="utf-8") as f:
             json.dump(out, f, separators=(",", ":"), sort_keys=True)
         print("OK", name, len(rates), "currencies")
