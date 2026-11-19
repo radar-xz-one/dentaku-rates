@@ -4,7 +4,7 @@ import sys
 import time
 import urllib.request
 
-SOURCES = []
+CRYPTO = ["BTC", "ETH", "USDT", "XRP", "BNB", "SOL", "DOGE", "ADA", "LTC", "TRX"]
 
 
 def get(url):
@@ -33,12 +33,25 @@ def fawaz_fallback():
     return rates, int(time.time())
 
 
+def crypto():
+    """Crypto rates (units per 1 JPY). Optional: failure here must not fail the whole update."""
+    for url in ("https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/jpy.json",
+                "https://latest.currency-api.pages.dev/v1/currencies/jpy.json"):
+        try:
+            j = get(url)["jpy"]
+            return {c: j[c.lower()] for c in CRYPTO if j.get(c.lower())}
+        except Exception as e:
+            print("CRYPTO FAILED", url, e, file=sys.stderr)
+    return {}
+
+
 for name, fn in [("open.er-api.com", er_api), ("fawazahmed0 (jsdelivr)", fawaz), ("fawazahmed0 (pages.dev)", fawaz_fallback)]:
     try:
         rates, ts = fn()
         rates = {k: v for k, v in rates.items() if isinstance(v, (int, float)) and v > 0}
         if len(rates) < 50 or "USD" not in rates:
             raise ValueError("too few rates: %d" % len(rates))
+        rates.update(crypto())
         out = {"source": name, "updated_unix": int(ts), "fetched_unix": int(time.time()), "base": "JPY", "rates": rates}
         with open("docs/rates.json", "w", encoding="utf-8") as f:
             json.dump(out, f, separators=(",", ":"), sort_keys=True)
